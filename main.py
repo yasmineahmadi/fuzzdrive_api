@@ -11,7 +11,9 @@ speed = ctrl.Antecedent(np.arange(0, 61, 1), 'speed')
 acceleration = ctrl.Consequent(np.arange(0, 21, 1), 'acceleration')
 
 # ... (Define membership functions, rules, and control system as in the previous code)
-
+@app.route('/')
+def welcome():
+    return "hello"
 @app.route('/api', methods=['POST'])
 def fuzzy_controller():
     try:
