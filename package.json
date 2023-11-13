@@ -1,0 +1,21 @@
+{
+  "name": "fuzzydrive",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "start" :"node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "chahid ahmadi",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
+    "netlify-cli": "17.2.2",
+    "netlify-lambda":"^2.0.15",
+    "serverless-http": "3.2.0",
+    "fuzzy": "^0.1.3"
+  }
+}
