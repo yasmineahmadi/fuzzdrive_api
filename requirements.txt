@@ -1,4 +1,4 @@
 
 flask==2.2.2
 scikit-fuzzy==0.4.2
-flask-cors==2.9.0
+flask-cors==4.0.0
