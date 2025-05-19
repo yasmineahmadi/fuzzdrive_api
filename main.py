@@ -2,69 +2,118 @@ from flask import Flask, request, jsonify
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 from flask_cors import CORS
+from typing import Dict, Any, Tuple
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-# Input variables
-distance = ctrl.Antecedent(universe=(0, 100), label='distance')
-speed = ctrl.Antecedent(universe=(0, 60), label='speed')
-traffic_light = ctrl.Antecedent(universe=(0, 1), label='traffic_light')  # 0: Red, 1: Green
+class FuzzyAccelerationController:
+    def __init__(self):
+        """Initialize the fuzzy logic control system."""
+        self.request_counter = 0
+        self.fuzzy_system = self._setup_fuzzy_system()
+        
+    def _setup_fuzzy_system(self) -> ctrl.ControlSystemSimulation:
+        """Configure the fuzzy logic variables and rules."""
+        # Input variables
+        distance = ctrl.Antecedent(universe=(0, 100), label='distance')
+        speed = ctrl.Antecedent(universe=(0, 60), label='speed')
+        traffic_light = ctrl.Antecedent(universe=(0, 1), label='traffic_light')  # 0: Red, 1: Green
 
-# Output variable
-acceleration = ctrl.Consequent(universe=(0, 20), label='acceleration')
+        # Output variable
+        acceleration = ctrl.Consequent(universe=(0, 20), label='acceleration')
 
-# Membership functions
-distance['near'] = fuzz.trimf(distance.universe, [0, 0, 50])
-distance['medium'] = fuzz.trimf(distance.universe, [10, 50, 90])
-distance['far'] = fuzz.trimf(distance.universe, [50, 100, 100])
+        # Membership functions
+        distance.automf(3, names=['near', 'medium', 'far'])
+        speed.automf(3, names=['slow', 'moderate', 'fast'])
+        
+        traffic_light['red'] = fuzz.trimf(traffic_light.universe, [0, 0, 0.5])
+        traffic_light['green'] = fuzz.trimf(traffic_light.universe, [0.5, 1, 1])
 
-speed['slow'] = fuzz.trimf(speed.universe, [0, 0, 30])
-speed['moderate'] = fuzz.trimf(speed.universe, [10, 30, 50])
-speed['fast'] = fuzz.trimf(speed.universe, [30, 60, 60])
+        acceleration['decelerate'] = fuzz.trimf(acceleration.universe, [0, 0, 10])
+        acceleration['maintain'] = fuzz.trimf(acceleration.universe, [5, 10, 15])
+        acceleration['accelerate'] = fuzz.trimf(acceleration.universe, [10, 20, 20])
 
-traffic_light['red'] = fuzz.trimf(traffic_light.universe, [0, 0, 0.5])
-traffic_light['green'] = fuzz.trimf(traffic_light.universe, [0.5, 1, 1])
+        # Rule base - expanded for better coverage
+        rules = [
+            ctrl.Rule(distance['near'] & speed['slow'] & traffic_light['red'], acceleration['decelerate']),
+            ctrl.Rule(distance['near'] & speed['moderate'] & traffic_light['red'], acceleration['decelerate']),
+            ctrl.Rule(distance['medium'] & speed['moderate'] & traffic_light['green'], acceleration['maintain']),
+            ctrl.Rule(distance['far'] & speed['fast'] & traffic_light['green'], acceleration['accelerate']),
+            ctrl.Rule(distance['far'] & speed['moderate'] & traffic_light['green'], acceleration['maintain']),
+            ctrl.Rule(distance['medium'] & speed['slow'] & traffic_light['green'], acceleration['maintain']),
+            ctrl.Rule(distance['near'] & speed['fast'] & traffic_light['red'], acceleration['decelerate']),
+            ctrl.Rule(distance['far'] & speed['slow'] & traffic_light['green'], acceleration['accelerate'])
+        ]
 
-acceleration['decelerate'] = fuzz.trimf(acceleration.universe, [0, 0, 10])
-acceleration['maintain'] = fuzz.trimf(acceleration.universe, [5, 10, 15])
-acceleration['accelerate'] = fuzz.trimf(acceleration.universe, [10, 20, 20])
+        control_system = ctrl.ControlSystem(rules)
+        return ctrl.ControlSystemSimulation(control_system)
 
-# Rule base
-rule1 = ctrl.Rule(antecedent=(distance['near'] & speed['slow'] & traffic_light['red']), consequent=acceleration['decelerate'])
-rule2 = ctrl.Rule(antecedent=(distance['medium'] & speed['moderate'] & traffic_light['green']), consequent=acceleration['maintain'])
-rule3 = ctrl.Rule(antecedent=(distance['far'] & speed['fast'] & traffic_light['green']), consequent=acceleration['accelerate'])
+    def get_recommendation(self, input_data: Dict[str, float]) -> Tuple[Dict[str, Any], int]:
+        """Process input data and return acceleration recommendation."""
+        self.request_counter += 1
+        logger.info(f"Processing request #{self.request_counter}")
 
-# Control system
-fuzzySystem = ctrl.ControlSystem(rules=[rule1, rule2, rule3])
-fuzzySystemSimulation = ctrl.ControlSystemSimulation(fuzzySystem)
+        try:
+            # Validate input
+            if not all(key in input_data for key in ['distance', 'speed', 'traffic_light']):
+                return {'status': 'error', 'message': 'Missing required parameters'}, 400
 
-# Counter for requests
-request_counter = 0
+            # Convert and validate values
+            distance_val = float(input_data['distance'])
+            speed_val = float(input_data['speed'])
+            traffic_val = float(input_data['traffic_light'])
+
+            if not (0 <= distance_val <= 100):
+                return {'status': 'error', 'message': 'Distance must be between 0-100'}, 400
+            if not (0 <= speed_val <= 60):
+                return {'status': 'error', 'message': 'Speed must be between 0-60'}, 400
+            if traffic_val not in (0, 1):
+                return {'status': 'error', 'message': 'Traffic light must be 0 (red) or 1 (green)'}, 400
+
+            # Compute fuzzy logic
+            self.fuzzy_system.input['distance'] = distance_val
+            self.fuzzy_system.input['speed'] = speed_val
+            self.fuzzy_system.input['traffic_light'] = traffic_val
+            self.fuzzy_system.compute()
+
+            result = round(float(self.fuzzy_system.output['acceleration']), 2)
+            
+            return {
+                'status': 'success',
+                'recommended_acceleration': result,
+                'request_count': self.request_counter
+            }, 200
+
+        except ValueError as e:
+            logger.error(f"Value error: {str(e)}")
+            return {'status': 'error', 'message': 'Invalid input values'}, 400
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return {'status': 'error', 'message': 'Internal server error'}, 500
+
+# Initialize controller
+controller = FuzzyAccelerationController()
 
 @app.route('/')
 def root():
-    global request_counter
-    return f"Chahid Ahmadi\nNumber of Requests: {request_counter}"
+    """Root endpoint showing basic information."""
+    return f"Fuzzy Logic Acceleration Controller\nNumber of Requests: {controller.request_counter}"
 
 @app.route('/api', methods=['POST'])
 def recommend_acceleration():
-    global request_counter
-    request_counter += 1
-
+    """API endpoint for acceleration recommendations."""
     data = request.get_json()
-
-    if 'distance' not in data or 'speed' not in data or 'traffic_light' not in data:
-        return jsonify({'status': 'denied', 'error': 'Invalid input. Please provide distance, speed, and traffic_light.'}), 400
-
-    fuzzySystemSimulation.input['distance'] = int(data['distance'])
-    fuzzySystemSimulation.input['speed'] = int(data['speed'])
-    fuzzySystemSimulation.input['traffic_light'] = float(data['traffic_light'])
-    fuzzySystemSimulation.compute()
-
-    result = fuzzySystemSimulation.output['acceleration']
-
-    return jsonify({'status': 'success', 'recommended_acceleration': result})
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No JSON data provided'}), 400
+    
+    response, status_code = controller.get_recommendation(data)
+    return jsonify(response), status_code
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
